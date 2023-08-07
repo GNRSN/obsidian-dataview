@@ -1,5 +1,5 @@
 /** Provides core preact / rendering utilities for all view types. */
-import { App, MarkdownRenderChild, MarkdownRenderer } from "obsidian";
+import { App, getIcon, MarkdownRenderChild, MarkdownRenderer, stringifyYaml, TFile } from "obsidian";
 import { h, createContext, ComponentChildren, render, Fragment } from "preact";
 import { useContext, useEffect, useRef, useState } from "preact/hooks";
 import { Component } from "obsidian";
@@ -11,6 +11,8 @@ import { renderMinimalDate, renderMinimalDuration } from "util/normalize";
 import { currentLocale } from "util/locale";
 import { DataArray } from "api/data-array";
 import { extractImageDimensions, isImageEmbed } from "util/media";
+import { TableQuery } from "query/query";
+import { JSXInternal } from "preact/src/jsx";
 
 export type MarkdownProps = { contents: string; sourcePath: string };
 export type MarkdownContext = { component: Component };
@@ -88,19 +90,146 @@ export function RawEmbedHtml({ element }: { element: HTMLElement }) {
 /** Embeds an HTML element in the react DOM. */
 export const EmbedHtml = React.memo(RawEmbedHtml);
 
+const NO_OPTIMISTIC = 'DATA_VIEW_FIELD_NO_OPTIMISTIC';
+
+const ObsidianIcon = ({iconName, ...props}: { iconName: string & JSXInternal.HTMLAttributes<HTMLDivElement>}) => {
+
+  const icon = getIcon(iconName);
+  if (!icon) return (
+    <div
+      {...props}
+    >
+      [Missing icon: ]
+    </div>
+  )
+
+  return (
+    <div
+      {...props}
+      ref={node => node?.childElementCount === 0 && node?.appendChild(icon)}
+    />
+  )
+}
+
+const CheckBox = ({isChecked}: {isChecked: boolean}) => {
+
+  return (
+    <div style={{
+      display: "flex",
+      position: "relative",
+    }}>
+      <ObsidianIcon
+        iconName={"lucide-square"}
+      />
+      {isChecked && <ObsidianIcon
+        iconName={"lucide-check"}
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          transform: "scale(0.65)",
+        }}
+      />}
+    </div>
+  )
+}
+
+type EditorProps = { filePath: string, columnHeader: TableQuery['fields'][number] };
+
+const EditableBooleanField = ({editorProps, value}: { editorProps: EditorProps, value: boolean}) => {
+
+  const context = useContext(DataviewContext);
+
+  const [optimisticValue, setOptimisticValue] = useState<typeof NO_OPTIMISTIC | boolean>(NO_OPTIMISTIC);
+  const [isPending, setIsPending] = useState(false);
+
+  const isOptimistic = optimisticValue !== NO_OPTIMISTIC;
+  const presentedValue = isOptimistic ? optimisticValue : value;
+
+  console.log({editorProps})
+
+  // Reset when updated value is recieved.
+  useEffect(() => {
+    if (isOptimistic && value === optimisticValue) setOptimisticValue(NO_OPTIMISTIC);
+  }, [value, optimisticValue, isOptimistic]);
+
+  return (
+    <span>
+      <div
+        style={{
+          display: "flex",
+          cursor: isPending ? "not-allowed" : "pointer",
+          opacity: isPending ? 0.5 : 1
+        }}
+        disabled={isPending}
+        onClick={async () => {
+          if (isPending) return;
+          setIsPending(true);
+          // REVIEW: Maybe cant cast this?
+          const file = context.app.vault.getAbstractFileByPath(editorProps.filePath) as TFile
+          if (!file) {
+            throw new Error(`File ${editorProps.filePath} not found`);
+          }
+
+          const field = {...editorProps.columnHeader.field};
+          if (field.type !== 'variable') throw new Error('Expected field to be of type variable');
+
+          const fieldName = field.name;
+          const newValue = !presentedValue;
+
+          console.log({file, fieldName, newValue});
+          const updateYamlProperty = (key: string, newValue: string | boolean, file: TFile): string => {
+              const fileCache = context.app.metadataCache.getFileCache(file);
+              if (!fileCache) throw new Error('Unexpected: No file cache');
+              const frontMatter = fileCache.frontmatter;
+              if (!frontMatter) throw new Error('Unexpected: No frontmatter in file')
+
+              const { position, ...metaData} = frontMatter;
+              metaData[key] = newValue;
+              return stringifyYaml(metaData);
+          };
+
+          setOptimisticValue(newValue);
+
+          const updatedMetaData = `---\n${updateYamlProperty(fieldName, newValue, file)}\n---`;
+          const fileCache = context.app.metadataCache.getFileCache(file);
+          //@ts-ignore
+          const frontmatterPosition = fileCache.frontmatter.position;
+          const fileContents = await context.app.vault.read(file);
+
+          const deleteFrom = frontmatterPosition.start.offset;
+          const deleteTo = frontmatterPosition.end.offset;
+
+          const newFileContents = fileContents.substring(0, deleteFrom) + updatedMetaData + fileContents.substring(deleteTo);
+
+          await context.app.vault.modify(file, newFileContents);
+          setIsPending(false);
+
+          context.app.workspace.trigger("dataview:refresh-views");
+          return;
+        }}
+      ><CheckBox isChecked={presentedValue}/></div>
+    </span>
+  )
+}
+
 /** Intelligently render an arbitrary literal value. */
 export function RawLit({
     value,
     sourcePath,
     inline = false,
     depth = 0,
+    editorProps,
 }: {
     value: Literal | undefined;
     sourcePath: string;
     inline?: boolean;
     depth?: number;
+    editorProps?: EditorProps;
 }) {
     const context = useContext(DataviewContext);
+
+  const isEditable = true;
 
     // Short-circuit if beyond the maximum render depth.
     if (depth >= context.settings.maxRecursiveRenderDepth) return <Fragment>...</Fragment>;
@@ -112,7 +241,7 @@ export function RawLit({
     } else if (Values.isNumber(value)) {
         return <Fragment>{"" + value}</Fragment>;
     } else if (Values.isBoolean(value)) {
-        return <Fragment>{"" + value}</Fragment>;
+        return isEditable && !!editorProps ? <EditableBooleanField value={value} editorProps={editorProps} /> : <Fragment>{"" + value}</Fragment>;
     } else if (Values.isDate(value)) {
         return <Fragment>{renderMinimalDate(value, context.settings, currentLocale())}</Fragment>;
     } else if (Values.isDuration(value)) {

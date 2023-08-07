@@ -1,6 +1,6 @@
-import { Literal } from "data-model/value";
+import { Link, Literal } from "data-model/value";
 import { executeTable } from "query/engine";
-import { Query } from "query/query";
+import { Query, TableQuery } from "query/query";
 import { asyncTryOrPropogate } from "util/normalize";
 import {
     DataviewContext,
@@ -27,10 +27,12 @@ export function TableGrouping({
     headings,
     values,
     sourcePath,
+    query
 }: {
     headings: string[];
     values: Literal[][];
     sourcePath: string;
+    query: TableQuery
 }) {
     let settings = useContext(DataviewContext).settings;
 
@@ -50,9 +52,16 @@ export function TableGrouping({
                 <tbody class="table-view-tbody">
                     {values.map(row => (
                         <tr>
-                            {row.map(element => (
+                            {row.map((element, idx) => (
                                 <td>
-                                    <Lit value={element} sourcePath={sourcePath} />
+                                    <Lit
+                                      value={element}
+                                      sourcePath={sourcePath}
+                                      editorProps={{
+                                        filePath: (row[0] as Link).path,
+                                        columnHeader: idx === 0 ? {name: "File", field: { type: "variable", name: "File"}} : query.fields[idx - 1],
+                                      }}
+                                    />
                                 </td>
                             ))}
                         </tr>
@@ -104,7 +113,7 @@ export function TableView({ query, sourcePath }: { query: Query; sourcePath: str
             </Fragment>
         );
 
-    return <TableGrouping headings={items.headings} values={items.values} sourcePath={sourcePath} />;
+    return <TableGrouping headings={items.headings} values={items.values} sourcePath={sourcePath} query={query.header as TableQuery}/>;
 }
 
 export function createTableView(init: DataviewInit, query: Query, sourcePath: string): MarkdownRenderChild {
@@ -117,5 +126,5 @@ export function createFixedTableView(
     values: Literal[][],
     sourcePath: string
 ): MarkdownRenderChild {
-    return new ReactRenderer(init, <TableGrouping values={values} headings={headings} sourcePath={sourcePath} />);
+    return new ReactRenderer(init, <TableGrouping values={values} headings={headings} sourcePath={sourcePath} query={{ type: 'table', fields: [], showId: false, }} />);
 }

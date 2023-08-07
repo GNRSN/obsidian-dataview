@@ -11,6 +11,12 @@ export interface NamedField {
     name: string;
     /** The value of this field. */
     field: Field;
+
+    options?: {
+        values: string[]
+    }
+
+    editable?: boolean
 }
 
 /** A query sort by field, for determining sort order. */
@@ -23,8 +29,10 @@ export interface QuerySortBy {
 
 /** Utility functions for quickly creating fields. */
 export namespace QueryFields {
-    export function named(name: string, field: Field): NamedField {
-        return { name, field } as NamedField;
+    export function named(name: string, field: Field): NamedField;
+    export function named(name: string, field: Field, editOptions: { values: string[] }): NamedField;
+    export function named(name: string, field: Field, editOptions: { values: string[] } | undefined = undefined): NamedField {
+        return { name, field, editable: !!editOptions, options: { values: editOptions?.values || [] } } as NamedField;
     }
 
     export function sortBy(field: Field, dir: "ascending" | "descending"): QuerySortBy {

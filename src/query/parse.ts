@@ -29,6 +29,7 @@ interface QueryLanguageTypes {
     explicitNamedField: NamedField;
     namedField: NamedField;
     sortField: QuerySortBy;
+    optionsField: NamedField;
 
     // Entire clauses in queries.
     headerClause: QueryHeader;
@@ -78,6 +79,7 @@ export const QUERY_LANGUAGE = P.createLanguage<QueryLanguageTypes>({
         ),
     namedField: q =>
         P.alt<NamedField>(
+            q.optionsField,
             q.explicitNamedField,
             captureRaw(EXPRESSION.field).map(([value, text]) => QueryFields.named(stripNewlines(text), value))
         ),
@@ -95,6 +97,15 @@ export const QUERY_LANGUAGE = P.createLanguage<QueryLanguageTypes>({
                 };
             }
         ),
+    optionsField: q =>
+        P.seqMap(
+            EXPRESSION.field.skip(P.whitespace),
+            P.regexp(/AS/i).skip(P.whitespace),
+            EXPRESSION.identifier.or(EXPRESSION.string).skip(P.whitespace),
+            P.regexp(/OPTIONS/i).skip(P.whitespace),
+            EXPRESSION.string,
+            (field, _as, ident, _options, providedOptions) => QueryFields.named(ident, field, { values: providedOptions.split(',').map(opt => opt.trim())})
+        ),
 
     headerClause: q =>
         q.queryType
@@ -109,7 +120,7 @@ export const QUERY_LANGUAGE = P.createLanguage<QueryLanguageTypes>({
                             P.sepBy(q.namedField, P.string(",").trim(P.optWhitespace)),
                             (withoutId, fields) => {
                                 return { type: "table", fields, showId: withoutId.length == 0 } as QueryHeader;
-                            }
+                            },
                         );
                     case "list":
                         return P.seqMap(
