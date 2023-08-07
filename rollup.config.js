@@ -32,7 +32,9 @@ const DEV_PLUGIN_CONFIG = {
         name: "Dataview (Development)",
     },
     plugins: getRollupPlugins(
-        undefined,
+        {
+            abortOnError: false,
+        },
         copy({
             targets: [
                 { src: "manifest.json", dest: "test-vault/.obsidian/plugins/dataview/" },
